@@ -199,7 +199,7 @@ function subevent_handlers.SPELL_AURA_APPLIED(state, ...)
 
 
 	if AuraBreak.auras_we_care_about_by_name[spell_name] then
-		print("#### WE CARE")
+		debug_print("#### WE CARE")
 		if not state.mobs[dest_guid] then
 			state.mobs[dest_guid] = {
 				name=dest_name,

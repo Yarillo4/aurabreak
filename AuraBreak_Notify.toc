@@ -1,0 +1,7 @@
+## Interface: 11305
+## Title: AuraBreak_Notify
+## Notes: Message people who broke an important aura. Tells the caster of that aura that it got broken, and by whom.
+## Author: Yarillo
+## SavedVariables: AuraBreak
+## LoadManagers: AddonLoader
+AuraBreak_Notify.lua

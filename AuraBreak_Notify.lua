@@ -46,8 +46,59 @@ function table.find(haystack, needle)
 	return nil 
 end
 
+function table.concat_indexes(t, character)
+	local str = ""
+	for i,_ in pairs(t) do
+		str = str .. i .. ", "
+	end
+	if string.len(str) > 3 then
+		return string.sub(str, 1, -3)
+	else
+		return str
+	end
+end
+
+
+function table.has_same_types(tested, ref, depth, path)
+	-- check if all top level elements of tested and ref have the same type
+	if not depth then depth = 1 end
+	if depth <= 0 then return true end
+	if not path then path = "" end
+
+	-- You may have extra elements
+	if not ref then return true end
+
+	for i,v in pairs(ref) do
+		--print("'" .. path .. "." .. i .. "'", type(tested[i]), type(ref[i]))
+
+		if type(ref[i]) ~= type(tested[i]) then
+			if type(ref[i]) ~= nil then
+				return false, path .. "." .. i, tested, i, v, tested[i]
+			else
+				-- You may have extra
+			end
+		elseif type(tested[i]) == "table" or type(ref[i]) == "table" then
+			local res, p, tab, ind, val, otherval = table.has_same_types(tested[i], ref[i], depth-1, path .. "." .. i)
+			if not res then 
+				return res, p, tab, ind, val, otherval
+			end
+		end
+	end
+
+	return true
+end
+
+
 local function printf(format, ...)
 	return print(string.format(format, ...))
+end
+
+local function printf_error(format, ...)
+	return printf(WrapTextInColorCode(format, RED), ...)
+end
+
+local function print_error(first, ...)
+	print(WrapTextInColorCode(first, RED), ...)
 end
 
 local function debug_print(...)
@@ -92,7 +143,7 @@ end
 local function unwatch_spell(spell_to_unwatch)
 	-- if user passed bogus spell name
 	if not spell_to_unwatch or tostring(spell_to_unwatch) == "" then
-		print("AuraBreak Notify: Error, wrong usage for 'unwatch'\n" .. "Usage: " .. cmd.UNWATCH.syntax)
+		print_error("AuraBreak Notify error, wrong usage for 'unwatch'\n" .. "Usage: " .. cmd.UNWATCH.syntax)
 		return false
 	end
 
@@ -123,7 +174,7 @@ end
 
 local function watch_spell(spell_name)
 	if spell_name == "" or not spell_name then
-		print("AuraBreak Notify: Error, wrong usage for 'watch'\n" .. "Usage: " .. cmd.WATCH.syntax)
+		print_error("AuraBreak Notify error, wrong usage for 'watch'\n" .. "Usage: " .. cmd.WATCH.syntax)
 		return false
 	end
 
@@ -155,9 +206,8 @@ local function spells_by_name(spell_IDs)
 	return t
 end
 
-local function reset()
-	if not AuraBreak then AuraBreak = {} end
-	AuraBreak = {
+local function s_reset()
+	return {
 		debug = AuraBreak.debug or false,
 		auto_whisper = AuraBreak.auto_whisper or false,
 		whisper_everyone = AuraBreak.whisper_everyone or false,
@@ -181,13 +231,32 @@ local function reset()
 			2637, 18658, 18657,                     -- Druid hibernate
 			--6358,                                   -- Succubus seduction
 		},
-		auras_we_care_about_by_name = {} -- filled at runtime
+		auras_we_care_about_by_name = {}, -- filled at runtime
+		people_not_to_warn = {},
+		people_not_to_tell_denunciations = {},
 	}
+end
+
+local function reset()
+	if not AuraBreak then AuraBreak = {} end
+	AuraBreak = s_reset()
 
 	AuraBreak.auras_we_care_about_by_name = spells_by_name(AuraBreak.auras_we_care_about)
 end
 
+local function check_saved_variables_integrity()
+	local baseline = s_reset()
 
+	repeat
+		local res, p, tab, ind, val, otherval = table.has_same_types(AuraBreak, baseline)
+		if res ~= true then
+			print_error("AuraBreak Notify error, We had to reset some configurations. This can happen when you update the addon. If you haven't, please report it to the author on 'https://www.curseforge.com/wow/addons/aurabreak-notify/issues/create' along with the details below.")
+			printf_error("  Index at fault: AuraBreak%s (was %s)", p, tostring(otherval))
+
+			tab[ind] = val
+		end
+	until res == true
+end
 
 --------------------------------------------------------------------------------
 ------------Event handling for the combat log-----------------------------------
@@ -236,25 +305,33 @@ function subevent_handlers.SPELL_AURA_REMOVED(state, ...)
 
 					if AuraBreak.denunciation then
 						local dest = mob.auras[spell_name].caster
-						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
-							-- He broke it
-							SendChatMessage(
-								string.format(_L.denunciation_format, mob.last_hit.caster, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+						local blacklisted = AuraBreak.people_not_to_tell_denunciations[string.lower(dest)]
 
-								, "WHISPER", nil, dest
-							)
+						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
+							if not blacklisted then
+								-- He broke it
+								SendChatMessage(
+									string.format(_L.denunciation_format, mob.last_hit.caster, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+
+									, "WHISPER", nil, dest
+								)
+							end
 						end
 					end
 
 					if AuraBreak.warnings then
 						local dest = mob.last_hit.caster
-						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
-							-- You broke it
-							SendChatMessage(
-								string.format(_L.warning_format, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+						local blacklisted = AuraBreak.people_not_to_warn[string.lower(dest)]
 
-								, "WHISPER", nil, dest
-							)
+						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
+							if not blacklisted then
+								-- You broke it
+								SendChatMessage(
+									string.format(_L.warning_format, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+
+									, "WHISPER", nil, dest
+								)
+							end
 						end
 					end
 
@@ -300,7 +377,7 @@ function subevent_handlers.SPELL_AURA_REMOVED(state, ...)
 end
 local function ANY_DAMAGE(state, spell_name, ...)
 	-- If mob with aura is threatened, log the hit
-	local timestamp,_,_,_, source_name,_,_, dest_guid,_,_,_,_, spell_name = ...
+	local timestamp,_,_,_, source_name,_,_, dest_guid = ...
 	local mob = state.mobs[dest_guid]
 
 	debug_print("## DAMAGE", spell_name)
@@ -315,6 +392,7 @@ local function ANY_DAMAGE(state, spell_name, ...)
 	end
 end
 function subevent_handlers.SPELL_DAMAGE(state, ...)
+	local _,_,_,_,_,_,_,_,_,_,_,_, spell_name = ...
 	return ANY_DAMAGE(state, spell_name, ...)
 end
 subevent_handlers.SPELL_PERIODIC_DAMAGE = subevent_handlers.SPELL_DAMAGE
@@ -349,7 +427,7 @@ function f:reset_mob(dest_guid)
 end
 
 function f:RESET_TRACKING()
-	--print("## RESET_TRACKING")
+	--debug_print("## RESET_TRACKING")
 	if self.mobs then
 		for i,v in pairs(self.mobs) do
 			--print("  ## ", v.name)
@@ -545,6 +623,47 @@ cmd = {
 			print_status("denunciation")
 		end,
 	},
+	NO_WHISP = {
+		syntax="no_whisp <warnings | denunciations> <name> [remove]",
+		help="Add people to your 'no whisp' list. You can remove them later by adding 'remove' at the end of the command.",
+		toString=function()
+			print("Don't whisp warnings:")
+			print("  [" .. table.concat_indexes(AuraBreak.people_not_to_warn, ", ") .. "]")
+			
+			print("Don't whisp denunciations:")
+			print("  [" .. table.concat_indexes(AuraBreak.people_not_to_tell_denunciations, ", ") .. "]")
+		end,
+		handler=function(_, arg)
+			local what, who, mode = string.match(arg, "^([^ ]*) *([^ ]*) *([(remove)]*)$")
+			local filter
+
+			what = string.lower(what)
+			if what == "warnings" then
+				filter = "people_not_to_warn"
+			elseif what == "denunciations" then
+				filter = "people_not_to_tell_denunciations"
+			else
+				printf_error("AuraBreak Notify error, '%s' isn't a valid argument. Did you mean 'warnings' or 'denunciations'?", what)
+				return
+			end
+			
+			mode = string.lower(mode)
+			who = string.lower(who)
+			if mode == "remove" then
+				if AuraBreak[filter][who] ~= nil then
+					AuraBreak[filter][who] = nil
+					printf("Will start sending %s to %s again", what, who)
+				else
+					printf("AuraBreak was already sending %s to %s", what, who)
+				end
+			elseif mode == "" then
+				AuraBreak[filter][who] = true
+				printf("Will not send %s to %s anymore", what, who)
+			else
+				printf_error("AuraBreak Notify error, '%s' isn't a valid operator. Did you mean 'remove'?", mode)
+			end
+		end
+	},
 	DEATH_RESET = {
 		syntax="death_reset <on | off>",
 		help="Toggles messages for auras broken by the death of an NPC. You probably want this ON, turning it off is a niche use. Mainly for debugging purposes.",
@@ -600,6 +719,7 @@ local function on_variable_load()
 	end
 	
 	if not AuraBreak then reset() end
+	check_saved_variables_integrity()
 	print_spell_list()
 end
 

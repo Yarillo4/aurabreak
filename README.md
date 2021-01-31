@@ -41,6 +41,7 @@ For example, if a Mage casts Polymorph on a Boar and a warrior cleaves it few se
 | /abn announcements &lt;**off** \| party \| raid \| always&gt; | Configures when to broadcast aura breaks. Default is OFF. I find it distasteful, but it's available anyway.<br>    OFF: Never<br>    PARTY: When in group or in raid (will use /raid if you're in raid, /party if not)<br>    RAID: Only in raid<br>    ALWAYS: Even alone, you will broadcast aurabreaks in /say (note: this API call was protected in 1.13.3, it now only works in dungeons or battlegrounds) |
 | /abn warnings &lt;**on** \| off&gt; | Toggles whispering the aura breaker that they broke an aura. |
 | /abn denunciation &lt;**on** \| off&gt; | Toggles whispering to the original caster of an important aura that his spell broke. |
+| /abn no_whisp &lt;warnings \| denunciations&gt; &lt;name&gt; \[remove\] | Add people to your 'no whisp' list. You can remove them later by adding 'remove' at the end of the command. |
 | /abn death_reset &lt;**on** \| off&gt; | Toggles messages for auras broken by the death of an NPC. You probably want this ON, turning it off is a niche use. Mainly for debugging purposes. |
 | /abn help | Gives detailed instructions about a /abn command |
 

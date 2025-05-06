@@ -37,13 +37,13 @@ function table.hasKey(haystack, needle)
 end
 
 function table.find(haystack, needle)
-	for i,v in pairs(haystack) do 
+	for i,v in pairs(haystack) do
 		if v == needle then
 			return i
 		end
 	end
 
-	return nil 
+	return nil
 end
 
 function table.concat_indexes(t, character)
@@ -79,7 +79,7 @@ function table.has_same_types(tested, ref, depth, path)
 			end
 		elseif type(tested[i]) == "table" or type(ref[i]) == "table" then
 			local res, p, tab, ind, val, otherval = table.has_same_types(tested[i], ref[i], depth-1, path .. "." .. i)
-			if not res then 
+			if not res then
 				return res, p, tab, ind, val, otherval
 			end
 		end
@@ -114,10 +114,10 @@ end
 local function print_spell_list()
 	local list = {}
 	for i,v in pairs(AuraBreak.auras_we_care_about) do
-		local spell_name, rank, _, _, _, _, spell_id = GetSpellInfo(v)
+		local spell_name, rank, _, _, _, _, spell_id = GetSpellInfo(v) --Returns bunk for spellID on 3.3.5
 		if not list[spell_name] then list[spell_name] = {} end
 
-		table.insert(list[spell_name], spell_id)
+		table.insert(list[spell_name], rank or "No rank")
 	end
 
 	print("AuraBreakNotify spell list:")
@@ -129,7 +129,7 @@ end
 local function tprint(t, indent)
 	if not indent then indent = "" end
 
-	for i,v in pairs(t) do 
+	for i,v in pairs(t) do
 		if type(v) == "table" then
 			print(indent .. tostring(i) .. ": {")
 			tprint(v, "  "..indent)
@@ -151,7 +151,7 @@ local function unwatch_spell(spell_to_unwatch)
 
 	-- list of spell ids
 	local found = 0
-	local lower_spell_to_unwatch_name = string.lower(spell_to_unwatch_name)	
+	local lower_spell_to_unwatch_name = string.lower(spell_to_unwatch_name)
 	for i,spell_id in pairs(AuraBreak.auras_we_care_about) do
 		local spell_name, _, _, _, _, _, spell_id = GetSpellInfo(spell_id)
 		if spell_id ~= nil then
@@ -170,7 +170,7 @@ local function unwatch_spell(spell_to_unwatch)
 	end
 
 	return found
-end 
+end
 
 local function watch_spell(spell_name)
 	if spell_name == "" or not spell_name then
@@ -438,10 +438,10 @@ end
 
 function f:COMBAT_LOG_EVENT_UNFILTERED(...)
 	if AuraBreak.enabled == false then return end
-	
+
 	local _, subevent = ...
 	local subevent_handler = subevent_handlers[subevent]
-	
+
 	if subevent_handler ~= nil then
 		subevent_handler(self, ...)
 	end
@@ -460,7 +460,7 @@ local function print_usage()
 	print(help_str)
 end
 local function get_status(subcommand)
-	local SUBCOMMAND = string.upper(subcommand) 
+	local SUBCOMMAND = string.upper(subcommand)
 	if cmd[SUBCOMMAND] and cmd[SUBCOMMAND].toString then
 		return cmd[SUBCOMMAND]:toString()
 	else
@@ -500,7 +500,7 @@ local function print_help(subcommand)
 	if cmd[SUBCOMMAND] then
 		printf("Aura Break Notify: Here's the help for the command '%s':", subcommand)
 		printf("  Syntax: %s", cmd[SUBCOMMAND].syntax or "")
-		
+
 		local help = cmd[SUBCOMMAND].help
 		if help then
 			printf("    %s", help)
@@ -523,7 +523,7 @@ cmd = {
 	RESET = {
 		syntax="reset",
 		help="Reset the addon's configs to its defaults",
-		handler=function() 
+		handler=function()
 			reset()
 			print_spell_list()
 		end,
@@ -531,7 +531,7 @@ cmd = {
 	WATCH = {
 		syntax="watch <spell_name | spell_id>",
 		help="Will start watching aura breaks for this spell",
-		handler=function(_, arg) 
+		handler=function(_, arg)
 			local ret, err = watch_spell(arg)
 			if ret then
 				print("Success!")
@@ -567,7 +567,7 @@ cmd = {
 		toString=function()
 			return "AuraBreak is " .. (AuraBreak.enabled and WrapTextInColorCode("enabled", GREEN) or WrapTextInColorCode("disabled", RED))
 		end,
-		handler=function() 
+		handler=function()
 			AuraBreak.enabled = true
 			print("AuraBreak Notifications enabled")
 		end,
@@ -587,7 +587,7 @@ cmd = {
 				return "AuraBreak public announcements are set to " .. WrapTextInColorCode(AuraBreak.announcements, GREEN)
 			end
 		end,
-		handler=function(_, arg) 
+		handler=function(_, arg)
 			local ARG=string.upper(arg)
 			if table.hasKey(ANNOUNCEMENTS, ARG) then
 				AuraBreak.announcements = ARG
@@ -603,7 +603,7 @@ cmd = {
 		toString=function()
 			return "AuraBreak warnings are " .. (AuraBreak.warnings and WrapTextInColorCode("ON", GREEN) or WrapTextInColorCode("OFF", RED))
 		end,
-		handler=function(_, arg) 
+		handler=function(_, arg)
 			if arg ~= "" then
 				AuraBreak.warnings = (arg == "on") and true or false
 			end
@@ -616,7 +616,7 @@ cmd = {
 		toString=function()
 			return "AuraBreak denunciations are " .. (AuraBreak.denunciation and WrapTextInColorCode("ON", GREEN) or WrapTextInColorCode("OFF", RED))
 		end,
-		handler=function(_, arg) 
+		handler=function(_, arg)
 			if arg ~= "" then
 				AuraBreak.denunciation = (arg == "on") and true or false
 			end
@@ -629,7 +629,7 @@ cmd = {
 		toString=function()
 			print("Don't whisp warnings:")
 			print("  [" .. table.concat_indexes(AuraBreak.people_not_to_warn, ", ") .. "]")
-			
+
 			print("Don't whisp denunciations:")
 			print("  [" .. table.concat_indexes(AuraBreak.people_not_to_tell_denunciations, ", ") .. "]")
 		end,
@@ -646,7 +646,7 @@ cmd = {
 				printf_error("AuraBreak Notify error, '%s' isn't a valid argument. Did you mean 'warnings' or 'denunciations'?", what)
 				return
 			end
-			
+
 			mode = string.lower(mode)
 			who = string.lower(who)
 			if mode == "remove" then
@@ -667,7 +667,7 @@ cmd = {
 	DEATH_RESET = {
 		syntax="death_reset <on | off>",
 		help="Toggles messages for auras broken by the death of an NPC. You probably want this ON, turning it off is a niche use. Mainly for debugging purposes.",
-		toString=function() 
+		toString=function()
 			return "AuraBreak reset on death is " .. (AuraBreak.reset_on_death and WrapTextInColorCode("ON", GREEN) or WrapTextInColorCode("OFF", RED))
 		end,
 		handler=function(_, arg)
@@ -717,7 +717,7 @@ local function on_variable_load()
 			print_usage()
 		end
 	end
-	
+
 	if not AuraBreak then reset() end
 	check_saved_variables_integrity()
 	print_spell_list()

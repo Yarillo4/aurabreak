@@ -111,25 +111,6 @@ local function debug_print(...)
 	end
 end
 
-local function numeric_checksum(text)
-	local counter = 1
-	local len = string.len(text)
-	for i = 1, len, 3 do
-		counter = math.fmod(counter*8257, 16777259) +
-			(string.byte(text,i)) +
-			((string.byte(text,i+1) or 1)*127) +
-			((string.byte(text,i+2) or 2)*16383)
-	end
-	return math.fmod(counter, 16777213)
-end
-
-local function spell_hash(spell_name, rank, icon, powerCost, isFunnel, powerType, castingtime, minRange, maxrange)
-	if spell_name == nil then
-		return nil
-	end
-	return numeric_checksum(spell_name..rank)
-end
-
 --------------------------------------------------------------------------------
 ------------Addon functionalities-----------------------------------------------
 --------------------------------------------------------------------------------

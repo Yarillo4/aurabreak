@@ -460,7 +460,6 @@ end
 
 function f:COMBAT_LOG_EVENT_UNFILTERED(timestamp, subevent, ...)
 	if AuraBreak.enabled == false then return end
-	print("SUBEVENT: ", subevent)
 
 	local subevent_handler = subevent_handlers[subevent]
 

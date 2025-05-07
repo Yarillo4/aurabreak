@@ -8,7 +8,6 @@ local _L = {}
 
 local f = CreateFrame("Frame")
 f.mobs = {}
-
 -- Localization
 if string.sub(locale, 1, 2) == "fr" then
 	_L.warning_format = "Tu as cassé '%s' sur '%s' avec '%s' ! Le sort a duré %.2fs"
@@ -26,6 +25,11 @@ else
 end
 
 -- utils
+local function myWrapTextInColorCode(i, colorHexString)
+	return "|c"..colorHexString..i.."|cffffffff"
+end
+local WrapTextInColorCode = WrapTextInColorCode or myWrapTextInColorCode
+
 function table.hasKey(haystack, needle)
 	for i,v in pairs(haystack) do
 		if i == needle then
@@ -107,6 +111,25 @@ local function debug_print(...)
 	end
 end
 
+local function numeric_checksum(text)
+	local counter = 1
+	local len = string.len(text)
+	for i = 1, len, 3 do
+		counter = math.fmod(counter*8257, 16777259) +
+			(string.byte(text,i)) +
+			((string.byte(text,i+1) or 1)*127) +
+			((string.byte(text,i+2) or 2)*16383)
+	end
+	return math.fmod(counter, 16777213)
+end
+
+local function spell_hash(spell_name, rank, icon, powerCost, isFunnel, powerType, castingtime, minRange, maxrange)
+	if spell_name == nil then
+		return nil
+	end
+	return numeric_checksum(spell_name..rank)
+end
+
 --------------------------------------------------------------------------------
 ------------Addon functionalities-----------------------------------------------
 --------------------------------------------------------------------------------
@@ -114,10 +137,15 @@ end
 local function print_spell_list()
 	local list = {}
 	for i,v in pairs(AuraBreak.auras_we_care_about) do
-		local spell_name, rank, _, _, _, _, spell_id = GetSpellInfo(v) --Returns bunk for spellID on 3.3.5
-		if not list[spell_name] then list[spell_name] = {} end
+		local spell_name, rank = GetSpellInfo(v) --GetSpellInfo doesn't give us spellID on 3.3.5
+		if spell_name then
+			if not list[spell_name] then list[spell_name] = {} end
 
-		table.insert(list[spell_name], rank or "No rank")
+			table.insert(list[spell_name], rank or "No rank")
+		else
+			if not list[v] then list[v] = {} end
+			table.insert(list[v], "No rank")
+		end
 	end
 
 	print("AuraBreakNotify spell list:")
@@ -126,14 +154,14 @@ local function print_spell_list()
 	end
 end
 
-local function tprint(t, indent)
+function tprint(t, indent)
 	if not indent then indent = "" end
 
 	for i,v in pairs(t) do
 		if type(v) == "table" then
 			print(indent .. tostring(i) .. ": {")
 			tprint(v, "  "..indent)
-			print("}")
+			print(indent.."}")
 		else
 			print(indent .. tostring(i),v)
 		end
@@ -147,14 +175,14 @@ local function unwatch_spell(spell_to_unwatch)
 		return false
 	end
 
-	local spell_to_unwatch_name, _, _, _, _, _, spell_to_unwatch_id = GetSpellInfo(spell_to_unwatch)
+	local spell_to_unwatch_name = GetSpellInfo(spell_to_unwatch)
 
 	-- list of spell ids
 	local found = 0
 	local lower_spell_to_unwatch_name = string.lower(spell_to_unwatch_name)
 	for i,spell_id in pairs(AuraBreak.auras_we_care_about) do
-		local spell_name, _, _, _, _, _, spell_id = GetSpellInfo(spell_id)
-		if spell_id ~= nil then
+		local spell_name = GetSpellInfo(spell_id)
+		if spell_name ~= nil then
 			if string.lower(spell_name) == lower_spell_to_unwatch_name then
 				AuraBreak.auras_we_care_about[i] = nil
 				AuraBreak.auras_we_care_about_by_name[spell_name] = nil
@@ -172,27 +200,32 @@ local function unwatch_spell(spell_to_unwatch)
 	return found
 end
 
-local function watch_spell(spell_name)
-	if spell_name == "" or not spell_name then
+local function watch_spell(spell_id)
+	if spell_id == "" or not spell_id then
 		print_error("AuraBreak Notify error, wrong usage for 'watch'\n" .. "Usage: " .. cmd.WATCH.syntax)
 		return false
 	end
 
-	local _, _, _, _, _, _, spell_id = GetSpellInfo(spell_name)
-	if type(spell_id) ~= "number" then
+	local spell_name, rank, icon, powerCost, isFunnel, powerType, castingtime, minRange, maxrange = GetSpellInfo(spell_id)
+	if spell_name == nil then
 		print("AuraBreak Notify: Spell '" .. spell_name .. "'' not found. Try to use a spell ID instead, those always work.")
 		return false
 	end
 
+	if AuraBreak.auras_we_care_about_by_name[spell_name] then
+		print("AuraBreak Notify: Spell '" .. spell_name .. "'' is already being watched")
+		return false
+	end
+
 	for i,v in pairs(AuraBreak.auras_we_care_about) do
-		if v == spell_id then
-			print("AuraBreak Notify: Spell '" .. spell_name .. "'' is already being watched (" .. spell_id .. ")")
+		if v == spell_name or GetSpellName(v) == spell_name then
+			print("AuraBreak Notify: Spell '" .. spell_name .. "'' is already being watched")
 			return false
 		end
 	end
 
-	AuraBreak.auras_we_care_about[#AuraBreak.auras_we_care_about] = spell_id
-	AuraBreak.auras_we_care_about_by_name[spell_name] = spell_id
+	AuraBreak.auras_we_care_about[#AuraBreak.auras_we_care_about] = spell_name
+	AuraBreak.auras_we_care_about_by_name[spell_name] = spell_name
 	return true
 end
 
@@ -263,8 +296,8 @@ end
 --------------------------------------------------------------------------------
 local subevent_handlers = {}
 function subevent_handlers.SPELL_AURA_APPLIED(state, ...)
-	local timestamp, subevent, unk, source_guid, source_name, source_flags, source_raid_flags, dest_guid, dest_name, dest_flags, destRaidFlags, unk_int, spell_name, aura_type_name = ...
-	debug_print("## AURA APPLIED", spell_name)
+	local timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id, spell_name, aura_type_name = ...
+	debug_print("## AURA APPLIED", spell_name, spell_id)
 
 
 	if AuraBreak.auras_we_care_about_by_name[spell_name] then
@@ -283,8 +316,79 @@ function subevent_handlers.SPELL_AURA_APPLIED(state, ...)
 	end
 end
 
+local function maybe_tattle(mob)
+	debug_print("#### LAST HIT FOUND", mob.last_hit.spell_name, mob.last_hit.caster, mob.auras[mob.aura_broken].caster)
+	if mob.last_hit.caster ~= mob.auras[mob.aura_broken].caster or AuraBreak.auto_whisper then
+		local time_buff_was_up = mob.time_aura_broke - mob.auras[mob.aura_broken].timestamp
+
+		if AuraBreak.denunciation then
+			local dest = mob.auras[mob.aura_broken].caster
+			local blacklisted = AuraBreak.people_not_to_tell_denunciations[string.lower(dest)]
+
+			if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
+				if not blacklisted then
+					-- He broke it
+					SendChatMessage(
+						string.format(_L.denunciation_format, mob.last_hit.caster, mob.aura_broken, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+
+						, "WHISPER", nil, dest
+					)
+				end
+			end
+		end
+
+		if AuraBreak.warnings then
+			local dest = mob.last_hit.caster
+			local blacklisted = AuraBreak.people_not_to_warn[string.lower(dest)]
+
+			if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
+				if not blacklisted then
+					-- You broke it
+					SendChatMessage(
+						string.format(_L.warning_format, mob.aura_broken, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+
+						, "WHISPER", nil, dest
+					)
+				end
+			end
+		end
+
+		if AuraBreak.announcements ~= "OFF" then
+			local restriction_level_allowed = ANNOUNCEMENTS[AuraBreak.announcements] or ANNOUNCEMENTS.OFF
+			local channel
+			local channel_restriction
+			local talk = true
+
+			-- 1 Off => 
+			-- 2 Raid => Raid
+			-- 3 Party => Party and raid
+			-- 4 Always => Party and raid and say
+
+			if UnitInRaid("player") then
+				channel = "RAID"
+				channel_restriction = ANNOUNCEMENTS.RAID
+			elseif UnitInParty("player") then
+				channel = "PARTY"
+				channel_restriction = ANNOUNCEMENTS.PARTY
+			else
+				channel = "SAY"
+				channel_restriction = ANNOUNCEMENTS.ALWAYS
+			end
+
+			print(restriction_level_allowed, channel_restriction, channel, string.format(_L.announcement_format, mob.last_hit.caster, mob.aura_broken, mob.name, mob.last_hit.spell_name, time_buff_was_up))
+
+			if restriction_level_allowed >= channel_restriction then
+				SendChatMessage(
+					string.format(_L.announcement_format, mob.last_hit.caster, mob.aura_broken, mob.name, mob.last_hit.spell_name, time_buff_was_up)
+					, channel, nil
+				)
+			end
+		end
+	end
+end
+
 function subevent_handlers.SPELL_AURA_REMOVED(state, ...)
-	local timestamp, subevent, unk, source_guid, source_name, source_flags, source_raid_flags, dest_guid, dest_name, dest_flags, destRaidFlags, unk_int, spell_name, aura_type_name = ...
+	local timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id, spell_name, unk_int, aura_type_name = ...
 	-- If aura removed then check why and notify aura breaker
 
 	debug_print("## AURA REMOVED", spell_name)
@@ -292,115 +396,52 @@ function subevent_handlers.SPELL_AURA_REMOVED(state, ...)
 	-- If mob is tracked
 	if state.mobs[dest_guid] and AuraBreak.auras_we_care_about_by_name[spell_name] then
 		debug_print("#### WE CARE", state.mobs[dest_guid].name)
-		C_Timer.After(1, function()
-			local mob = state.mobs[dest_guid]
-			if not mob or not mob.auras or not mob.auras[spell_name] then return end
 
-			debug_print("## TATTLING")
-			-- If mob was hit recently
-			if mob.last_hit then
-				debug_print("#### LAST HIT FOUND", mob.last_hit.spell_name, mob.last_hit.caster, mob.auras[spell_name].caster)
-				if mob.last_hit.caster ~= mob.auras[spell_name].caster or AuraBreak.auto_whisper then
-					local time_buff_was_up = timestamp - mob.auras[spell_name].timestamp
+		local mob = state.mobs[dest_guid]
+		if not mob or not mob.auras or not mob.auras[spell_name] then return end
 
-					if AuraBreak.denunciation then
-						local dest = mob.auras[spell_name].caster
-						local blacklisted = AuraBreak.people_not_to_tell_denunciations[string.lower(dest)]
-
-						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
-							if not blacklisted then
-								-- He broke it
-								SendChatMessage(
-									string.format(_L.denunciation_format, mob.last_hit.caster, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
-
-									, "WHISPER", nil, dest
-								)
-							end
-						end
-					end
-
-					if AuraBreak.warnings then
-						local dest = mob.last_hit.caster
-						local blacklisted = AuraBreak.people_not_to_warn[string.lower(dest)]
-
-						if AuraBreak.whisper_everyone or UnitInParty(dest) or UnitInRaid(dest) or (UnitGUID(dest) == UnitGUID("player") and AuraBreak.auto_whisper) then
-							if not blacklisted then
-								-- You broke it
-								SendChatMessage(
-									string.format(_L.warning_format, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
-
-									, "WHISPER", nil, dest
-								)
-							end
-						end
-					end
-
-					if AuraBreak.announcements ~= "OFF" then
-						local restriction_level_allowed = ANNOUNCEMENTS[AuraBreak.announcements] or ANNOUNCEMENTS.OFF
-						local channel
-						local channel_restriction
-						local talk = true
-
-						-- 1 Off => 
-						-- 2 Raid => Raid
-						-- 3 Party => Party and raid
-						-- 4 Always => Party and raid and say
-
-						if UnitInRaid("player") then
-							channel = "RAID"
-							channel_restriction = ANNOUNCEMENTS.RAID
-						elseif UnitInParty("player") then
-							channel = "PARTY"
-							channel_restriction = ANNOUNCEMENTS.PARTY
-						else
-							channel = "SAY"
-							channel_restriction = ANNOUNCEMENTS.ALWAYS
-						end
-
-						print(restriction_level_allowed, channel_restriction, channel, string.format(_L.announcement_format, mob.last_hit.caster, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up))
-
-						if restriction_level_allowed >= channel_restriction then
-							SendChatMessage(
-								string.format(_L.announcement_format, mob.last_hit.caster, spell_name, mob.name, mob.last_hit.spell_name, time_buff_was_up)
-								, channel, nil
-							)
-						end
-					end
-				end
-			end
-
-			if mob.auras[spell_name] then
-				mob.auras[spell_name] = nil
-			end
-		end)
+		mob.aura_broken = spell_name
+		mob.time_aura_broke = timestamp
 	end
 end
-local function ANY_DAMAGE(state, spell_name, ...)
+local function ANY_DAMAGE(state, spell_name, timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id)
 	-- If mob with aura is threatened, log the hit
-	local timestamp,_,_,_, source_name,_,_, dest_guid = ...
 	local mob = state.mobs[dest_guid]
 
 	debug_print("## DAMAGE", spell_name)
 
 	if mob then
-		debug_print("#### WE CARE", mob.name)
-		mob.last_hit = {
-			caster=source_name,
-			timestamp=timestamp,
-			spell_name=spell_name,
-		}
+		if mob.aura_broken then
+			debug_print("### TATTLING", spell_name)
+			mob.last_hit = {
+				caster=source_name,
+				timestamp=timestamp,
+				spell_name=spell_name,
+			}
+			maybe_tattle(mob)
+			mob.aura_broken = nil
+			mob.time_aura_broke = nil
+			if mob.auras[mob.aura_broken] then
+				mob.auras[mob.aura_broken] = nil
+			end
+		end
 	end
 end
 function subevent_handlers.SPELL_DAMAGE(state, ...)
-	local _,_,_,_,_,_,_,_,_,_,_,_, spell_name = ...
-	return ANY_DAMAGE(state, spell_name, ...)
+	local timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id, spell_name, unk_int, aura_type_name = ...
+	return ANY_DAMAGE(state, spell_name, timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id)
 end
 subevent_handlers.SPELL_PERIODIC_DAMAGE = subevent_handlers.SPELL_DAMAGE
+
 function subevent_handlers.SWING_DAMAGE(state, ...)
-	return ANY_DAMAGE(state, _L.swing, ...)
+	local timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags = ...
+	local spell_id = 6603
+	return ANY_DAMAGE(state, _L.swing, timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id)
 end
 function subevent_handlers.RANGE_DAMAGE(state, ...)
-	return ANY_DAMAGE(state, _L.ranged, ...)
+	local timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags = ...
+	local spell_id = 5019
+	return ANY_DAMAGE(state, _L.ranged, timestamp, subevent, source_guid, source_name, source_flags, dest_guid, dest_name, dest_flags, spell_id)
 end
 
 function subevent_handlers.UNIT_DIED(state, ...)
@@ -436,14 +477,14 @@ function f:RESET_TRACKING()
 	end
 end
 
-function f:COMBAT_LOG_EVENT_UNFILTERED(...)
+function f:COMBAT_LOG_EVENT_UNFILTERED(timestamp, subevent, ...)
 	if AuraBreak.enabled == false then return end
+	print("SUBEVENT: ", subevent)
 
-	local _, subevent = ...
 	local subevent_handler = subevent_handlers[subevent]
 
 	if subevent_handler ~= nil then
-		subevent_handler(self, ...)
+		subevent_handler(self, timestamp, subevent, ...)
 	end
 end
 
@@ -730,9 +771,9 @@ f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 f:RegisterEvent("ZONE_CHANGED")
 f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 f:RegisterEvent("VARIABLES_LOADED")
-f:SetScript("OnEvent", function(self, event)
+f:SetScript("OnEvent", function(self, event, ...)
 	if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-		self:COMBAT_LOG_EVENT_UNFILTERED(CombatLogGetCurrentEventInfo())
+		self:COMBAT_LOG_EVENT_UNFILTERED(...)
 	elseif event == "VARIABLES_LOADED" then
 		on_variable_load()
 	elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_NEW_AREA" then
